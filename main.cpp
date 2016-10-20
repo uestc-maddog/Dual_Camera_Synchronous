@@ -13,7 +13,7 @@ LEP_CAMERA_PORT_DESC_T _port;
 
 int main(int argc, char *argv[])
 {
-    QApplication a(argc, argv);
+    QApplication app(argc, argv);
 
     lepton_connect();                           // Flir_AGC ON
     if(enable_lepton_agc() != 0) return 1;
@@ -22,7 +22,7 @@ int main(int argc, char *argv[])
     //w.resize(320, 320);
     w.show();
 
-    return a.exec();
+    return app.exec();
 }
 
 int lepton_connect(void)
