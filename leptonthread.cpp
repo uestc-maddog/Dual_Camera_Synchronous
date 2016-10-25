@@ -1,6 +1,6 @@
 #include "leptonthread.h"
 #include <QDebug>
-
+#include <QDateTime>
 #include <stdint.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -19,8 +19,9 @@ int Get_LeptonData(void);
 extern unsigned short Lepton_Data[];
 extern int minValue;
 extern int maxValue;
-extern volatile bool Get_Ready;   // 1:获取数据信号
-extern volatile bool Get_Over;    // 1:Flir获取数据完成
+extern volatile bool Get_Ready;     // 1:获取数据信号
+extern volatile bool Get_Over;      // 1:Flir获取数据完成
+extern volatile bool UVC_Init_Over; // 1:UVC初始化完成
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define VOSPI_FRAME_SIZE (164)
@@ -63,14 +64,20 @@ void leptonthread::run()
 {
     while(1)
     {
-        if(Get_Ready == 1)   // 开始获取摄像头数据
+        while(!UVC_Init_Over);     // 等待UVC初始化完成
+        while(1)
         {
-            Get_LeptonData();
-            msleep(90);
-            ShowSignal_Send();
-            //qDebug() << "LeptonGet Over...";
+            if(Get_Ready)          // 开始获取摄像头数据
+            {
+                //qDebug() << "L";
+                //msleep(90);
+                Get_LeptonData();
+                ShowSignal_Send();
+                msleep(50);
+                //Get_Ready = false;
+            }
+            msleep(2);
         }
-        msleep(2);   //105
     }
 }
 
@@ -146,6 +153,9 @@ int Get_LeptonData(void)
 //    printf("bits per word: %d\n", bits);
 //    printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
     while(transfer(fd) != 59);           // read SPI data(lepton)
+    QDateTime time = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
+    QString New_Timer = time.toString("mmss");
+    qDebug() << "L:"<< New_Timer;
     close(fd);
     save_Lepton_Data();
     return ret;

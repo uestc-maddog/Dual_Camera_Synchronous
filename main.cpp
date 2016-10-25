@@ -19,7 +19,6 @@ int main(int argc, char *argv[])
     if(enable_lepton_agc() != 0) return 1;
 
     MainWindow w;
-    //w.resize(320, 320);
     w.show();
 
     return app.exec();

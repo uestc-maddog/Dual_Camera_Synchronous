@@ -1,6 +1,7 @@
 #include "uvcthread.h"
 #include <QDebug>
 
+#include <QDateTime>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,8 +24,9 @@
 
 #define CAPTURE_MAX_BUFFER 5
 #define Color_Mode 1
-#define Edge_Detection_Mode 2   // 0:拉普拉斯     1:Robert     2:Sobel     3:Prewitt
-
+#define Edge_Detection_Mode 2    // 0:拉普拉斯     1:Robert     2:Sobel     3:Prewittuint
+const uint DataWidth = 320;
+const uint DataHeight = 240;
 char *CAPTURE_DEVICE = "/dev/video0";
 
 struct buf_info{
@@ -32,9 +34,7 @@ struct buf_info{
     unsigned int length;
     void *start;
 };
-
-struct video_dev
-        
+struct video_dev      
 {
     int fd;
     int cap_width, cap_height;
@@ -42,16 +42,19 @@ struct video_dev
     int numbuffer;
 } videodev;
 volatile short RGB_Data[320*240*3];
+volatile uchar *UVC_P;
 
 int initCapture(void);
 int startCapture(void);
 int captureFrame(void);
 int stopCapture(void);
 void closeCapture(void);
-void yuyv2rgb(const uchar *yuv, int yw, int yh);
+void yuyv2rgb(const uchar *yuv);
 
-bool volatile Get_Ready = 1;   // 1:获取数据信号
-bool volatile Get_Over = 0;    // 1:Flir获取数据完成
+volatile bool Get_Ready = true;      // true:获取数据信号
+volatile bool Get_Over = false;      // true:Flir获取数据完成
+volatile bool UVC_Init_Over = false; // true:UVC初始化完成
+
 
 int subInitCapture(void);
 void vidioc_enuminput(int fd);
@@ -65,15 +68,15 @@ void UVCThread::run()
 {
     while(1)
     {
-        if (initCapture() < 0)
-            return;
-
-        if (startCapture() < 0)
-            return;
+        if(initCapture()  < 0) return;
+        if(startCapture() < 0) return;
+        UVC_Init_Over = true;
         while (1)
-        {
-            if(Get_Ready == 1)   // 开始获取摄像头数据
+        {           
+            if(Get_Ready)   // 开始获取摄像头数据
             {
+                //qDebug() << "U";
+                //msleep(10);
                 if(captureFrame() < 0)    // 获取UVC数据出错
                 {
                     qDebug() << "Update Data Error!";
@@ -83,11 +86,12 @@ void UVCThread::run()
                 }
                 else
                 {
-                    //qDebug() << "Send Signal...";
-                    while(Get_Over == 0);                // 等待Flir获取数据完成
-                    ShowUVCSignal_Send();                // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
-                    //qDebug() << "Send OK...";
+                    while(!Get_Over);                // 等待Flir获取数据完成
+                    Get_Ready = false;
+                    //qDebug() << "U1";
+                    ShowUVCSignal_Send();            // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
                 }
+                msleep(107);
             }
             msleep(2);
         }
@@ -315,16 +319,17 @@ int captureFrame(void)
         qDebug() << "Cap VIDIOC_DQBUF";
         return ret;
     }
-
+    QDateTime time = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
+    QString New_Timer = time.toString("mmss");
+    qDebug() << "U:"<< New_Timer;
     //qDebug() << "videodev.cap_width =" << videodev.cap_width << "videodev.cap_height =" << videodev.cap_height;
-    yuyv2rgb((const uchar *)videodev.buff_info[buf.index].start, videodev.cap_width, videodev.cap_height);
-
     ret = ioctl(videodev.fd, VIDIOC_QBUF, &buf);
     if (ret < 0) {
         qDebug() << "Cap VIDIOC_QBUF";
         return ret;
     }
-
+    UVC_P = (uchar*)videodev.buff_info[buf.index].start;
+    //yuyv2rgb((const uchar *)videodev.buff_info[buf.index].start);
     return 0;
 }
 
@@ -364,20 +369,20 @@ void closeCapture(void)
     }
 }
 
-void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，也就是两个像素点，转换rgb，6个字节，还是两个像素点    yw*yh = 320*240
+void yuyv2rgb(const uchar *yuv)   // 每次取yuyv4个字节，也就是两个像素点，转换rgb，6个字节，还是两个像素点    yw*yh = 320*240
 {
     volatile short *rgb = RGB_Data;
     uint i = 0;
     int temp1 = 0;
 
     // YUYV to RGB
-    for (int y = 0; y < 240; ++y)
+    for (int y = 0; y < DataHeight; ++y)
     {
-        for (int x = 0; x < 320/2; ++x)
+        for (int x = 0; x < DataWidth/2; ++x)
         {
             uint temp = i * 6;
             i++;
-            temp1 = (yw*2*y+x*4);    // 像素点起始坐标（0，0）YUV 4:2:2采样，每两个Y共用一组UV分量
+            temp1 = (DataWidth*2*y+x*4);    // 像素点起始坐标（0，0）YUV 4:2:2采样，每两个Y共用一组UV分量
             uchar y1 = yuv[temp1];               // “Y”表示明亮度,也就是灰度值
             uchar y2 = yuv[temp1 + 2];
 
@@ -402,67 +407,67 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
             rgb[temp + 4] = y2;
             rgb[temp + 5] = y2;
 #endif
-            if(rgb[temp + 0] < 0)   rgb[temp + 0] = 0;
-            if(rgb[temp + 1] < 0)   rgb[temp + 1] = 0;
-            if(rgb[temp + 2] < 0)   rgb[temp + 2] = 0;
-            if(rgb[temp + 3] < 0)   rgb[temp + 3] = 0;
-            if(rgb[temp + 4] < 0)   rgb[temp + 4] = 0;
-            if(rgb[temp + 5] < 0)   rgb[temp + 5] = 0;
-            if(rgb[temp + 0] > 255) rgb[temp + 0] = 255;
-            if(rgb[temp + 1] > 255) rgb[temp + 1] = 255;
-            if(rgb[temp + 2] > 255) rgb[temp + 2] = 255;
-            if(rgb[temp + 3] > 255) rgb[temp + 3] = 255;
-            if(rgb[temp + 4] > 255) rgb[temp + 4] = 255;
-            if(rgb[temp + 5] > 255) rgb[temp + 5] = 255;
+//            if(rgb[temp + 0] < 0)   rgb[temp + 0] = 0;
+//            if(rgb[temp + 1] < 0)   rgb[temp + 1] = 0;
+//            if(rgb[temp + 2] < 0)   rgb[temp + 2] = 0;
+//            if(rgb[temp + 3] < 0)   rgb[temp + 3] = 0;
+//            if(rgb[temp + 4] < 0)   rgb[temp + 4] = 0;
+//            if(rgb[temp + 5] < 0)   rgb[temp + 5] = 0;
+//            if(rgb[temp + 0] > 255) rgb[temp + 0] = 255;
+//            if(rgb[temp + 1] > 255) rgb[temp + 1] = 255;
+//            if(rgb[temp + 2] > 255) rgb[temp + 2] = 255;
+//            if(rgb[temp + 3] > 255) rgb[temp + 3] = 255;
+//            if(rgb[temp + 4] > 255) rgb[temp + 4] = 255;
+//            if(rgb[temp + 5] > 255) rgb[temp + 5] = 255;
         }
     }
 
-    short Temp_Data[320*240*3] = {0};
-    // 3X3 高斯平滑滤波
-    for(int m = 0; m < 240; m++)
-    {
-        for(int n = 0; n < 320; n++)
-        {
-            uint Index = (m*320+n)*3;
-            if(m == 0 | n == 0 | m == 239 | n == 319)
-            {
-                short temp1 = rgb[Index];
-                Temp_Data[Index]   = temp1;
-                Temp_Data[Index+1] = temp1;
-                Temp_Data[Index+2] = temp1;
-            }
-            else
-            {
-                short temp =((rgb[((m-1)*320+(n-0))*3] + rgb[((m+1)*320+(n-0))*3] + rgb[((m-0)*320+(n-1))*3] + rgb[((m-0)*320+(n+1))*3]) * 2 \
-                           + (rgb[((m-1)*320+(n-1))*3] + rgb[((m-1)*320+(n+1))*3] + rgb[((m+1)*320+(n-1))*3] + rgb[((m+1)*320+(n+1))*3]) \
-                           + 4*rgb[Index]) / 16;
-                Temp_Data[Index]   = temp;
-                Temp_Data[Index+1] = temp;
-                Temp_Data[Index+2] = temp;
-            }
-        }
-    }
-    for(int m = 0; m < 240; m++)
-    {
-        for(int n = 0; n < 320; n++)
-        {
-            uint Index = (m*320+n)*3;
-            short temp = Temp_Data[Index];
-            rgb[Index]   = temp;
-            rgb[Index+1] = temp;
-            rgb[Index+2] = temp;
-         }
-    }
+    short Temp_Data[DataWidth*DataHeight*3] = {0};
+//    // 3X3 高斯平滑滤波
+//    for(int m = 0; m < 240; m++)
+//    {
+//        for(int n = 0; n < 320; n++)
+//        {
+//            uint Index = (m*320+n)*3;
+//            if(m == 0 | n == 0 | m == 239 | n == 319)
+//            {
+//                short temp1 = rgb[Index];
+//                Temp_Data[Index]   = temp1;
+//                Temp_Data[Index+1] = temp1;
+//                Temp_Data[Index+2] = temp1;
+//            }
+//            else
+//            {
+//                short temp =((rgb[((m-1)*320+(n-0))*3] + rgb[((m+1)*320+(n-0))*3] + rgb[((m-0)*320+(n-1))*3] + rgb[((m-0)*320+(n+1))*3]) * 2 \
+//                           + (rgb[((m-1)*320+(n-1))*3] + rgb[((m-1)*320+(n+1))*3] + rgb[((m+1)*320+(n-1))*3] + rgb[((m+1)*320+(n+1))*3]) \
+//                           + 4*rgb[Index]) / 16;
+//                Temp_Data[Index]   = temp;
+//                Temp_Data[Index+1] = temp;
+//                Temp_Data[Index+2] = temp;
+//            }
+//        }
+//    }
+//    for(int m = 0; m < 240; m++)
+//    {
+//        for(int n = 0; n < 320; n++)
+//        {
+//            uint Index = (m*320+n)*3;
+//            short temp = Temp_Data[Index];
+//            rgb[Index]   = temp;
+//            rgb[Index+1] = temp;
+//            rgb[Index+2] = temp;
+//         }
+//    }
 
     // 边缘检测
 #if Edge_Detection_Mode == 0
     // 拉普拉斯边缘检测
-    for(int m = 0; m < 240; m++)
+    for(int m = 0; m < DataHeight; m++)
     {
-        for(int n = 0; n < 320; n++)
+        for(int n = 0; n < DataWidth; n++)
         {
-            uint Index = (m*320+n)*3;
-            if(m == 0 || n == 0 || m == 239 || n == 319)
+            uint Index = (m*DataWidth+n)*3;
+            if(m == 0 || n == 0 || m == (DataWidth-1) || n == (DataHeight-1))
             {
                 short temp1 = rgb[Index];
                 Temp_Data[Index]   = temp1;
@@ -471,8 +476,8 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
             }
             else
             {
-                short temp = rgb[((m-1)*320+(n-0))*3] + rgb[((m+1)*320+(n-0))*3] + rgb[((m-0)*320+(n-1))*3] + rgb[((m-0)*320+(n+1))*3] \
-                           + rgb[((m-1)*320+(n-1))*3] + rgb[((m-1)*320+(n+1))*3] + rgb[((m+1)*320+(n-1))*3] + rgb[((m+1)*320+(n+1))*3] \
+                short temp = rgb[((m-1)*DataWidth+(n-0))*3] + rgb[((m+1)*DataWidth+(n-0))*3] + rgb[((m-0)*DataWidth+(n-1))*3] + rgb[((m-0)*DataWidth+(n+1))*3] \
+                           + rgb[((m-1)*DataWidth+(n-1))*3] + rgb[((m-1)*DataWidth+(n+1))*3] + rgb[((m+1)*DataWidth+(n-1))*3] + rgb[((m+1)*DataWidth+(n+1))*3] \
                            - 8*rgb[Index];
                 if(temp < 0) temp = 0-temp;
                 Temp_Data[Index]   = temp;
@@ -483,12 +488,12 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
     }
 #elif Edge_Detection_Mode == 1
     // Robert边缘检测   Prewitt算子对边缘的定位不如Roberts算子
-    for(int m = 0; m < 240; m++)
+    for(int m = 0; m < DataHeight; m++)
     {
-        for(int n = 0; n < 320; n++)
+        for(int n = 0; n < DataWidth; n++)
         {
-            uint Index = (m*320+n)*3;
-            if(m == 239 || n == 319)
+            uint Index = (m*DataWidth+n)*3;
+            if(m == (DataHeight-1) || n == (DataWidth-1))
             {
                 short temp1 = rgb[Index];
                 Temp_Data[Index]   = temp1;
@@ -497,7 +502,7 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
             }
             else
             {
-                short temp = rgb[Index] - rgb[((m+1)*320+(n+1))*3] + rgb[((m+1)*320+(n-0))*3] - rgb[((m-0)*320+(n+1))*3];
+                short temp = rgb[Index] - rgb[((m+1)*DataWidth+(n+1))*3] + rgb[((m+1)*DataWidth+(n-0))*3] - rgb[((m-0)*DataWidth+(n+1))*3];
                 if(temp < 0) temp = 0-temp;
                 Temp_Data[Index]   = temp;
                 Temp_Data[Index+1] = temp;
@@ -507,12 +512,12 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
     }
 #elif Edge_Detection_Mode == 2
     // Sobel边缘检测
-    for(int m = 0; m < 240; m++)
+    for(int m = 0; m < DataHeight; m++)
     {
-        for(int n = 0; n < 320; n++)
+        for(int n = 0; n < DataWidth; n++)
         {
-            uint Index = (m*320+n)*3;
-            if(m == 0 || n == 0 || m == 239 || n == 319)
+            uint Index = (m*DataWidth+n)*3;
+            if(m == 0 || n == 0 || m == (DataHeight-1) || n == (DataWidth-1))
             {
                 short temp1 = rgb[Index];
                 Temp_Data[Index]   = temp1;
@@ -521,24 +526,25 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
             }
             else
             {
-                short temp = (rgb[((m-1)*320+(n+1))*3] + rgb[((m+1)*320+(n+1))*3] + 2*rgb[((m-0)*320+(n+1))*3]) \
-                           - (rgb[((m-1)*320+(n-1))*3] + rgb[((m+1)*320+(n-1))*3] + 2*rgb[((m-0)*320+(n-1))*3]);
-                short temp2= (rgb[((m-1)*320+(n-1))*3] + rgb[((m-1)*320+(n+1))*3] + 2*rgb[((m-1)*320+(n+0))*3]) \
-                           - (rgb[((m+1)*320+(n-1))*3] + rgb[((m+1)*320+(n+1))*3] + 2*rgb[((m+1)*320+(n-0))*3]);
-                Temp_Data[Index]   = abs(temp) + abs(temp2);
-                Temp_Data[Index+1] = abs(temp) + abs(temp2);
-                Temp_Data[Index+2] = abs(temp) + abs(temp2);
+                short temp = (rgb[((m-1)*DataWidth+(n+1))*3] + rgb[((m+1)*DataWidth+(n+1))*3] + 2*rgb[((m-0)*DataWidth+(n+1))*3]) \
+                           - (rgb[((m-1)*DataWidth+(n-1))*3] + rgb[((m+1)*DataWidth+(n-1))*3] + 2*rgb[((m-0)*DataWidth+(n-1))*3]);
+                short temp2= (rgb[((m-1)*DataWidth+(n-1))*3] + rgb[((m-1)*DataWidth+(n+1))*3] + 2*rgb[((m-1)*DataWidth+(n+0))*3]) \
+                           - (rgb[((m+1)*DataWidth+(n-1))*3] + rgb[((m+1)*DataWidth+(n+1))*3] + 2*rgb[((m+1)*DataWidth+(n-0))*3]);
+                temp = abs(temp) + abs(temp2);
+                Temp_Data[Index]   = temp;
+                Temp_Data[Index+1] = temp;
+                Temp_Data[Index+2] = temp;
             }
         }
     }
 #elif Edge_Detection_Mode == 3
     // Prewitt边缘检测
-    for(int m = 0; m < 240; m++)
+    for(int m = 0; m < DataHeight; m++)
     {
-        for(int n = 0; n < 320; n++)
+        for(int n = 0; n < DataWidth; n++)
         {
-            uint Index = (m*320+n)*3;
-            if(m == 0 || n == 0 || m == 239 || n == 319)
+            uint Index = (m*DataWidth+n)*3;
+            if(m == 0 || n == 0 || m == (DataHeight-1) || n == (DataWidth-1))
             {
                 short temp1 = rgb[Index];
                 Temp_Data[Index]   = temp1;
@@ -547,10 +553,10 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
             }
             else
             {
-                short temp = (rgb[((m-1)*320+(n+1))*3] + rgb[((m+1)*320+(n+1))*3] + rgb[((m-0)*320+(n+1))*3]) \
-                           - (rgb[((m-1)*320+(n-1))*3] + rgb[((m+1)*320+(n-1))*3] + rgb[((m-0)*320+(n-1))*3]);
-                short temp2= (rgb[((m-1)*320+(n-1))*3] + rgb[((m-1)*320+(n+1))*3] + rgb[((m-1)*320+(n+0))*3]) \
-                           - (rgb[((m+1)*320+(n-1))*3] + rgb[((m+1)*320+(n+1))*3] + rgb[((m+1)*320+(n-0))*3]);
+                short temp = (rgb[((m-1)*DataWidth+(n+1))*3] + rgb[((m+1)*DataWidth+(n+1))*3] + rgb[((m-0)*DataWidth+(n+1))*3]) \
+                           - (rgb[((m-1)*DataWidth+(n-1))*3] + rgb[((m+1)*DataWidth+(n-1))*3] + rgb[((m-0)*DataWidth+(n-1))*3]);
+                short temp2= (rgb[((m-1)*DataWidth+(n-1))*3] + rgb[((m-1)*DataWidth+(n+1))*3] + rgb[((m-1)*DataWidth+(n+0))*3]) \
+                           - (rgb[((m+1)*DataWidth+(n-1))*3] + rgb[((m+1)*DataWidth+(n+1))*3] + rgb[((m+1)*DataWidth+(n-0))*3]);
                 if(temp < 0) temp = 0-temp;
                 if(temp2 < 0) temp = 0-temp2;
                 if(temp > temp2)
@@ -564,17 +570,18 @@ void yuyv2rgb(const uchar *yuv, int yw, int yh)   // 每次取yuyv4个字节，�
                     Temp_Data[Index]   = temp2;
                     Temp_Data[Index+1] = temp2;
                     Temp_Data[Index+2] = temp2;
-                }
+                }]   = 255;
+                rgb[Index
             }
         }
     }
 #endif
     int Threshold = 90;               // 边缘阈值
-    for(int m = 0; m < 240; m++)
+    for(int m = 0; m < DataHeight; m++)
     {
-        for(int n = 0; n < 320; n++)
+        for(int n = 0; n < DataWidth; n++)
         {
-            uint Index = (m*320+n)*3;
+            uint Index = (m*DataWidth+n)*3;
             short temp = Temp_Data[Index];
             if(temp > Threshold)
             {
