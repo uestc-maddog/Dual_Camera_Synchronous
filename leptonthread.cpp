@@ -1,5 +1,6 @@
 #include "leptonthread.h"
 #include <QDebug>
+#include <QSemaphore>
 #include <QDateTime>
 #include <stdint.h>
 #include <unistd.h>
@@ -22,6 +23,9 @@ extern int maxValue;
 extern volatile bool Get_Ready;     // 1:获取数据信号
 extern volatile bool Get_Over;      // 1:Flir获取数据完成
 extern volatile bool UVC_Init_Over; // 1:UVC初始化完成
+extern QSemaphore Get_Ready_sem;
+extern QSemaphore Get_Over_sem;
+extern QSemaphore Init_Over_sem;
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define VOSPI_FRAME_SIZE (164)
@@ -64,22 +68,52 @@ void leptonthread::run()
 {
     while(1)
     {
-        while(!UVC_Init_Over);     // 等待UVC初始化完成
+        bool temp = false;
+        do{
+            Init_Over_sem.acquire();
+            temp = UVC_Init_Over;
+            Init_Over_sem.release();
+        } while(!temp);     // 等待UVC初始化完成
         while(1)
         {
-            if(Get_Ready)          // 开始获取摄像头数据
-            {
-                //qDebug() << "L";
-                //msleep(90);
-                Get_LeptonData();
-                ShowSignal_Send();
-                msleep(50);
-                //Get_Ready = false;
-            }
-            msleep(2);
+            do{
+                Get_Ready_sem.acquire();
+                temp = Get_Ready;
+                Get_Ready_sem.release();
+                msleep(2);
+            } while(!temp);      // 开始获取摄像头数据
+
+            Get_Ready_sem.acquire();
+            Get_Ready = false;
+            Get_Ready_sem.release();
+
+            Get_LeptonData();
+            ShowSignal_Send();
+            //msleep(90);
         }
     }
 }
+
+//void leptonthread::run()
+//{
+//    while(1)
+//    {
+//        while(!UVC_Init_Over);     // 等待UVC初始化完成
+//        while(1)
+//        {
+//            if(Get_Ready)          // 开始获取摄像头数据
+//            {
+//                //qDebug() << "L";
+//                //msleep(90);
+//                Get_LeptonData();
+//                ShowSignal_Send();
+//                msleep(50);
+//                //Get_Ready = false;
+//            }
+//            msleep(2);
+//        }
+//    }
+//}
 
 static void save_Lepton_Data(void)
 {
@@ -104,11 +138,11 @@ int transfer(int fd)
 {
     int ret;
     int i;
-    int frame_number;
+    int frame_number = 0;
 
     ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
     if (ret < 1)
-        pabort("can't send spi message");
+        qDebug() << "can't send spi message";
 
     if(((lepton_frame_packet[0] & 0x0f) != 0x0f))
     {
@@ -122,6 +156,7 @@ int transfer(int fd)
             }
         }
     }
+    //qDebug() << frame_number;
     return frame_number;
 }
 
@@ -129,34 +164,35 @@ int Get_LeptonData(void)
 {
     int ret = 0;
     int fd;
+    //qDebug() << "L2";
+
     fd = open(device, O_RDWR); // 返回文件描述符（整型变量0~255）。由open 返回的文件描述符一定是该进程尚未使用的最小描述符。只要有一个权限被禁止则返回-1。
-    if (fd < 0) pabort("can't open device");
+    if (fd < 0) qDebug() << "can't open device";
 
     ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
-    if (ret == -1) pabort("can't set spi mode");
+    if (ret == -1) qDebug() << "can't set spi mode";
 
     ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
-    if (ret == -1) pabort("can't get spi mode");
+    if (ret == -1) qDebug() << "can't get spi mode";
 
     ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
-    if (ret == -1) pabort("can't set bits per word");
-
+    if (ret == -1) qDebug() << "can't set bits per word";
     ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
-    if (ret == -1) pabort("can't get bits per word");
+    if (ret == -1) qDebug() << "can't get bits per word";
 
     ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
-    if (ret == -1) pabort("can't set max speed hz");
+    if (ret == -1) qDebug() << "can't set max speed hz";
 
     ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed);
-    if (ret == -1) pabort("can't get max speed hz");
-//    printf("spi mode: %d\n", mode);
-//    printf("bits per word: %d\n", bits);
-//    printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
+    if (ret == -1) qDebug() << "can't get max speed hz";
+
+//    qDebug() << "spi mode:" << mode;
+//    qDebug() << "bits per word:" << bits;
+//    qDebug() << "max speed(Hz):" << speed;
+
     while(transfer(fd) != 59);           // read SPI data(lepton)
-    QDateTime time = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
-    QString New_Timer = time.toString("mmss");
-    qDebug() << "L:"<< New_Timer;
-    close(fd);
+    //qDebug() << "60";
     save_Lepton_Data();
+    close(fd);
     return ret;
 }

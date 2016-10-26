@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include <stdio.h>
 #include <QThread>
+#include <QSemaphore>
 #include <stdlib.h>
 
 #include<sys/types.h>
@@ -18,8 +19,15 @@
 #include<fcntl.h>
 
 extern volatile short RGB_Data[320*240*3];     // 320*240分辨率的RGB数据
-extern volatile bool Get_Ready;   // 1:获取数据信号
-extern volatile bool Get_Over;    // 1:Flir获取数据完成
+extern volatile bool Get_Ready;      // true:获取数据信号
+extern volatile bool Get_Over;       // true:Flir获取数据完成
+extern volatile bool Show_Over;      // true:一帧融合图像显示完成
+
+extern QSemaphore Get_Ready_sem;
+extern QSemaphore Get_Over_sem;
+extern QSemaphore Init_Over_sem;
+extern QSemaphore Show_Over_sem;
+
 extern volatile uchar *UVC_P;
 extern void yuyv2rgb(const uchar *yuv);
 
@@ -153,20 +161,7 @@ void MainWindow::updateUVCImage(void)
             UVCImage.setPixel(x, y, qRgb(Flir_Data[temp], Flir_Data[temp+1], Flir_Data[temp+2]));
         }
     }
-    //取图像中间1/4拉伸显示
-//    for (int y = 0; y < ImageHeight/2; ++y)
-//    {
-//        for (int x = 0; x < ImageWidth/2; ++x)
-//        {
-//            int temp = 3*(ImageWidth*(y+60)+x+80);    // 像素点起始坐标（80，60）
-//            UVCImage.setPixel(x*2, y*2, qRgb(RGB_Data[temp], RGB_Data[temp+1], RGB_Data[temp+2]));
-//            UVCImage.setPixel(x*2, y*2+1, qRgb(RGB_Data[temp], RGB_Data[temp+1], RGB_Data[temp+2]));
-//            UVCImage.setPixel(x*2+1, y*2, qRgb(RGB_Data[temp], RGB_Data[temp+1], RGB_Data[temp+2]));
-//            UVCImage.setPixel(x*2+1, y*2+1, qRgb(RGB_Data[temp], RGB_Data[temp+1], RGB_Data[temp+2]));
-//        }
-//    }
 
-    //qDebug() << "OK";
     // Update the on-screen image
     if(SnapShut == true)
     {
@@ -205,13 +200,14 @@ void MainWindow::updateUVCImage(void)
     QPainter painter(&pixmap);
     // ... mark up pixmap, if so desired
     imageLabel->setPixmap(pixmap);
-    QDateTime time1 = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
-    QString Timer = time1.toString("mmss");
-    qDebug() << "+:"<< Timer;
+//    QDateTime time1 = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
+//    QString Timer = time1.toString("mmss");
+//    qDebug() << "+:"<< Timer;
 
-    // 开始下一次获取
-    Get_Ready = true;   // 1:获取数据信号
-    Get_Over = false;    // 1:Flir获取数据完成
+    Show_Over_sem.acquire();
+    Show_Over = true;
+    Show_Over_sem.release();
+    qDebug() << "Show_Over";
 }
 
 void MainWindow::updateLeptonImage(void)
@@ -271,5 +267,7 @@ void MainWindow::updateLeptonImage(void)
             }
         }
     }
-    Get_Over = true;    // Flir获取数据完成
+    Get_Over_sem.acquire();
+    Get_Over = true;      // true:Flir获取数据完成
+    Get_Over_sem.release();
 }

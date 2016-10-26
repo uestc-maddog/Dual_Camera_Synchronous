@@ -1,14 +1,14 @@
 #-------------------------------------------------
 #
 # Project created by QtCreator 2016-09-08T19:52:17
-# UVC_X1+Flir融合
+# UVC_X1+Flir融合  修复同步 有卡顿
 #-------------------------------------------------
 
 QT       += core gui
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
-TARGET = UVC_Window_1
+TARGET = Dual_Camera_Sync
 TEMPLATE = app
 
 target.path = /home/pi/YJ_qt

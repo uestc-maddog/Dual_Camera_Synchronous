@@ -1,5 +1,6 @@
 #include "uvcthread.h"
 #include <QDebug>
+#include <QSemaphore>
 
 #include <QDateTime>
 #include <stdio.h>
@@ -51,10 +52,15 @@ int stopCapture(void);
 void closeCapture(void);
 void yuyv2rgb(const uchar *yuv);
 
-volatile bool Get_Ready = true;      // true:获取数据信号
-volatile bool Get_Over = false;      // true:Flir获取数据完成
-volatile bool UVC_Init_Over = false; // true:UVC初始化完成
+volatile bool Get_Ready = false;      // true:获取数据信号
+volatile bool Get_Over = false;       // true:Flir获取数据完成
+volatile bool UVC_Init_Over = false;  // true:UVC初始化完成
+volatile bool Show_Over = true;       // true:一帧融合图像显示完成
 
+QSemaphore Get_Ready_sem(1);
+QSemaphore Get_Over_sem(1);
+QSemaphore Init_Over_sem(1);
+QSemaphore Show_Over_sem(1);
 
 int subInitCapture(void);
 void vidioc_enuminput(int fd);
@@ -68,36 +74,94 @@ void UVCThread::run()
 {
     while(1)
     {
+        bool temp = false;
+
         if(initCapture()  < 0) return;
         if(startCapture() < 0) return;
+        Init_Over_sem.acquire();
         UVC_Init_Over = true;
+        Init_Over_sem.release();
+
         while (1)
-        {           
-            if(Get_Ready)   // 开始获取摄像头数据
+        {
+            // 等待上一帧融合图像显示完成
+            do{
+                Show_Over_sem.acquire();
+                temp = Show_Over;
+                Show_Over_sem.release();
+            } while(!temp);               // 等待Flir获取数据完成
+
+            // 开始下一次获取
+            Show_Over_sem.acquire();
+            Show_Over = false;        // true:一帧融合图像显示完成
+            Show_Over_sem.release();
+
+            Get_Ready_sem.acquire();
+            Get_Ready = true;         // true:获取数据信号
+            Get_Ready_sem.release();
+
+            Get_Over_sem.acquire();
+            Get_Over = false;         // true:Flir获取数据完成
+            Get_Over_sem.release();
+
+            //msleep(10);   // slow
+            if(captureFrame() < 0)    // 获取UVC数据出错
             {
-                //qDebug() << "U";
-                //msleep(10);
-                if(captureFrame() < 0)    // 获取UVC数据出错
-                {
-                    qDebug() << "Update Data Error!";
-                    stopCapture();
-                    closeCapture();
-                    break;
-                }
-                else
-                {
-                    while(!Get_Over);                // 等待Flir获取数据完成
-                    Get_Ready = false;
-                    //qDebug() << "U1";
-                    ShowUVCSignal_Send();            // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
-                }
-                msleep(107);
+                qDebug() << "Update Data Error!";
+                stopCapture();
+                closeCapture();
+                break;
             }
-            msleep(2);
+            else
+            {
+                do{
+                    Get_Over_sem.acquire();
+                    temp = Get_Over;
+                      Get_Over_sem.release();
+                } while(!temp);               // 等待Flir获取数据完成
+                qDebug() << "Get_Over";
+                ShowUVCSignal_Send();         // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
+            }
+            msleep(99);   //99
         }
         msleep(100);
     }
 }
+
+//void UVCThread::run()
+//{
+//    while(1)
+//    {
+//        if(initCapture()  < 0) return;
+//        if(startCapture() < 0) return;
+//        UVC_Init_Over = true;
+//        while (1)
+//        {
+//            if(Get_Ready)   // 开始获取摄像头数据
+//            {
+//                //qDebug() << "U";
+//                //msleep(10);
+//                if(captureFrame() < 0)    // 获取UVC数据出错
+//                {
+//                    qDebug() << "Update Data Error!";
+//                    stopCapture();
+//                    closeCapture();
+//                    break;
+//                }
+//                else
+//                {
+//                    while(!Get_Over);                // 等待Flir获取数据完成
+//                    Get_Ready = false;
+//                    //qDebug() << "U1";
+//                    ShowUVCSignal_Send();            // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
+//                }
+//                msleep(150);
+//            }
+//            msleep(2);
+//        }
+//        msleep(100);
+//    }
+//}
 
 int subInitCapture(void)
 {
@@ -319,9 +383,9 @@ int captureFrame(void)
         qDebug() << "Cap VIDIOC_DQBUF";
         return ret;
     }
-    QDateTime time = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
-    QString New_Timer = time.toString("mmss");
-    qDebug() << "U:"<< New_Timer;
+//    QDateTime time = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
+//    QString New_Timer = time.toString("mmss");
+//    qDebug() << "U:"<< New_Timer;
     //qDebug() << "videodev.cap_width =" << videodev.cap_width << "videodev.cap_height =" << videodev.cap_height;
     ret = ioctl(videodev.fd, VIDIOC_QBUF, &buf);
     if (ret < 0) {
