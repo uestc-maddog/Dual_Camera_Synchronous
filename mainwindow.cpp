@@ -149,9 +149,32 @@ void MainWindow::updateUVCImage(void)
 
     yuyv2rgb((const uchar *)UVC_P);
 
+    // 边界平移
+    short Shift_Data[320*240*3];
+    uchar Shift_Pixel = 13;                // 边界left平移12像素
+    for(int j = 0; j < ImageHeight; j++)
+    {
+        for(int k = 0; k < ImageWidth; k++)
+        {
+            uint Index = j*ImageWidth+k;
+            if(k < ImageWidth - Shift_Pixel)
+            {
+               Shift_Data[Index*3]   = RGB_Data[(Index+Shift_Pixel)*3];
+               Shift_Data[Index*3+1] = RGB_Data[(Index+Shift_Pixel)*3+1];
+               Shift_Data[Index*3+2] = RGB_Data[(Index+Shift_Pixel)*3+2];
+            }
+            else
+            {
+                Shift_Data[Index*3]   = 0;
+                Shift_Data[Index*3+1] = 0;
+                Shift_Data[Index*3+2] = 0;
+            }
+        }
+    }
     for (int i = 0; i < ImageHeight*ImageWidth*3; ++i)
     {
-        if(RGB_Data[i] == 255) Flir_Data[i] = 255;   // 描出边界点white
+        //if(RGB_Data[i] == 255) Flir_Data[i] = 255;   // 描出边界点white
+        if(Shift_Data[i] == 255) Flir_Data[i] = 255;   // 描出边界点white
     }
     for (int y = 0; y < ImageHeight; ++y)
     {
@@ -207,7 +230,8 @@ void MainWindow::updateUVCImage(void)
     Show_Over_sem.acquire();
     Show_Over = true;
     Show_Over_sem.release();
-    qDebug() << "Show_Over";
+    qDebug() << "+";
+    //qDebug() << "Show_Over";
 }
 
 void MainWindow::updateLeptonImage(void)

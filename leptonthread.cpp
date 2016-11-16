@@ -13,10 +13,10 @@
 #include <linux/spi/spidev.h>
 #include <limits.h>
 
-int transfer(int fd);
+static int  transfer(int fd);
 static void save_Lepton_Data(void);
-int Get_LeptonData(void);
 
+int Lepton_fd = 0;                  // Flir文件描述符
 extern unsigned short Lepton_Data[];
 extern int minValue;
 extern int maxValue;
@@ -36,7 +36,7 @@ static void pabort(const char *s)
     abort();
 }
 
-static const char *device = "/dev/spidev0.1";
+static const char *Flir_Device = "/dev/spidev0.1";
 uint8_t tx[VOSPI_FRAME_SIZE] = {0, };
 uint8_t lepton_frame_packet[VOSPI_FRAME_SIZE];
 static uint32_t speed = 16000000;
@@ -66,54 +66,60 @@ leptonthread::~leptonthread()
 
 void leptonthread::run()
 {
+    bool temp = false;
     while(1)
     {
-        bool temp = false;
+        Lepton_fd = open(Flir_Device, O_RDWR); // 返回文件描述符（整型变量0~255）。由open 返回的文件描述符一定是该进程尚未使用的最小描述符。只要有一个权限被禁止则返回-1。
+        if(Lepton_fd < 0)
+        {
+            qDebug() << "can't open device";
+        }
+
+        int ret = ioctl(Lepton_fd, SPI_IOC_WR_MODE, &mode);
+        if (ret == -1)
+        {
+            qDebug() << "can't set spi mode" << errno;
+        }
+        ret = ioctl(Lepton_fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
+        if (ret == -1)
+        {
+            qDebug() << "can't set bits per word" << errno;
+        }
+        ret = ioctl(Lepton_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
+        if (ret == -1)
+        {
+            qDebug() << "can't set max speed hz" << errno;
+        }
+
         do{
             Init_Over_sem.acquire();
             temp = UVC_Init_Over;
             Init_Over_sem.release();
         } while(!temp);     // 等待UVC初始化完成
+
         while(1)
         {
             do{
                 Get_Ready_sem.acquire();
                 temp = Get_Ready;
                 Get_Ready_sem.release();
-                msleep(2);
+                usleep(600);//msleep(2);
             } while(!temp);      // 开始获取摄像头数据
 
             Get_Ready_sem.acquire();
             Get_Ready = false;
             Get_Ready_sem.release();
 
-            Get_LeptonData();
+            //Flir摄像头数据
+            while(transfer(Lepton_fd) != 59);           // read SPI data(lepton)
+            save_Lepton_Data();
+
             ShowSignal_Send();
+            msleep(55);
             //msleep(90);
         }
     }
 }
-
-//void leptonthread::run()
-//{
-//    while(1)
-//    {
-//        while(!UVC_Init_Over);     // 等待UVC初始化完成
-//        while(1)
-//        {
-//            if(Get_Ready)          // 开始获取摄像头数据
-//            {
-//                //qDebug() << "L";
-//                //msleep(90);
-//                Get_LeptonData();
-//                ShowSignal_Send();
-//                msleep(50);
-//                //Get_Ready = false;
-//            }
-//            msleep(2);
-//        }
-//    }
-//}
 
 static void save_Lepton_Data(void)
 {
@@ -141,8 +147,7 @@ int transfer(int fd)
     int frame_number = 0;
 
     ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-    if (ret < 1)
-        qDebug() << "can't send spi message";
+    if (ret < 1) qDebug() << "can't send spi message";
 
     if(((lepton_frame_packet[0] & 0x0f) != 0x0f))
     {
@@ -156,43 +161,5 @@ int transfer(int fd)
             }
         }
     }
-    //qDebug() << frame_number;
     return frame_number;
-}
-
-int Get_LeptonData(void)
-{
-    int ret = 0;
-    int fd;
-    //qDebug() << "L2";
-
-    fd = open(device, O_RDWR); // 返回文件描述符（整型变量0~255）。由open 返回的文件描述符一定是该进程尚未使用的最小描述符。只要有一个权限被禁止则返回-1。
-    if (fd < 0) qDebug() << "can't open device";
-
-    ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
-    if (ret == -1) qDebug() << "can't set spi mode";
-
-    ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
-    if (ret == -1) qDebug() << "can't get spi mode";
-
-    ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
-    if (ret == -1) qDebug() << "can't set bits per word";
-    ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
-    if (ret == -1) qDebug() << "can't get bits per word";
-
-    ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
-    if (ret == -1) qDebug() << "can't set max speed hz";
-
-    ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed);
-    if (ret == -1) qDebug() << "can't get max speed hz";
-
-//    qDebug() << "spi mode:" << mode;
-//    qDebug() << "bits per word:" << bits;
-//    qDebug() << "max speed(Hz):" << speed;
-
-    while(transfer(fd) != 59);           // read SPI data(lepton)
-    //qDebug() << "60";
-    save_Lepton_Data();
-    close(fd);
-    return ret;
 }
