@@ -222,15 +222,11 @@ void MainWindow::updateUVCImage(void)
     QPainter painter(&pixmap);
     // ... mark up pixmap, if so desired
     imageLabel->setPixmap(pixmap);
-//    QDateTime time1 = QDateTime::currentDateTime(); // 获取系统 年月日时分秒
-//    QString Timer = time1.toString("mmss");
-//    qDebug() << "+:"<< Timer;
 
     Dual_Show_Over_sem.acquire();
     Dual_Show_Over = true;
     Dual_Show_Over_sem.release();
-    qDebug() << "+";
-    //qDebug() << "Show_Over";
+    //qDebug() << "+";
 }
 
 void MainWindow::updateLeptonImage(void)

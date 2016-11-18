@@ -1,13 +1,11 @@
 #include "uvcthread.h"
 #include <QDebug>
 #include <QSemaphore>
-
 #include <QDateTime>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-
 #include <getopt.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -590,7 +588,7 @@ void yuyv2rgb(const uchar *yuv)   // 每次取yuyv4个字节，也就是两个�
         }
     }
 #endif
-    int Threshold = 90;               // 边缘阈值
+    int Threshold = 120;               // 边缘阈值
     for(int m = 0; m < DataHeight; m++)
     {
         for(int n = 0; n < DataWidth; n++)
