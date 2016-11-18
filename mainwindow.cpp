@@ -218,7 +218,7 @@ void MainWindow::updateUVCImage(void)
 
         Old_Timer = New_Timer;
     }
-    QPixmap pixmap = QPixmap::fromImage(UVCImage).scaled(ImageWidth, ImageHeight, Qt::KeepAspectRatio);
+    QPixmap pixmap = QPixmap::fromImage(UVCImage).scaled(ImageWidth/2, ImageHeight/2, Qt::KeepAspectRatio);
     QPainter painter(&pixmap);
     // ... mark up pixmap, if so desired
     imageLabel->setPixmap(pixmap);

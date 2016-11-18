@@ -86,7 +86,7 @@ void UVCThread::run()
             Dual_Show_Over = false;        // 清除显示完成标志
 
             Dual_Get_Ready_sem.release();  // 开始同步获取UVC数据
-            //msleep(10);   // slow
+            //msleep(15);   // slow
             if(captureFrame() < 0)    // 获取UVC数据出错
             {
                 qDebug() << "Update Data Error!";
@@ -103,9 +103,9 @@ void UVCThread::run()
                 } while(!temp);               // 等待Flir获取数据完成
                 Flir_Get_Over = false;             // 清除完成标志
 
-                ShowUVCSignal_Send();         // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
+                ShowUVCSignal_Send();         // 发送更新摄像头数据信号，and不断地刷新RGB图像
             }
-            msleep(65);   //99
+            msleep(60);   //99
         }
         msleep(100);
     }

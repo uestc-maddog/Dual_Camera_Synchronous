@@ -100,7 +100,7 @@ void leptonthread::run()
             save_Lepton_Data();
 
             ShowSignal_Send();
-            msleep(60);
+            msleep(55);
         }
     }
 }
