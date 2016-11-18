@@ -20,12 +20,12 @@ int Lepton_fd = 0;                  // Flir文件描述符
 extern unsigned short Lepton_Data[];
 extern int minValue;
 extern int maxValue;
-extern volatile bool Get_Ready;     // 1:获取数据信号
-extern volatile bool Get_Over;      // 1:Flir获取数据完成
-extern volatile bool UVC_Init_Over; // 1:UVC初始化完成
-extern QSemaphore Get_Ready_sem;
-extern QSemaphore Get_Over_sem;
-extern QSemaphore Init_Over_sem;
+
+extern volatile bool Flir_Get_Over;      // 1:Flir获取数据完成
+
+extern QSemaphore Dual_Get_Ready_sem;
+extern QSemaphore Flir_Get_Over_sem;
+extern QSemaphore UVC_Init_Over_sem;
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define VOSPI_FRAME_SIZE (164)
@@ -90,33 +90,17 @@ void leptonthread::run()
         {
             qDebug() << "can't set max speed hz" << errno;
         }
-
-        do{
-            Init_Over_sem.acquire();
-            temp = UVC_Init_Over;
-            Init_Over_sem.release();
-        } while(!temp);     // 等待UVC初始化完成
-
+        UVC_Init_Over_sem.acquire();          // 等待UVC初始化完成
         while(1)
         {
-            do{
-                Get_Ready_sem.acquire();
-                temp = Get_Ready;
-                Get_Ready_sem.release();
-                usleep(600);//msleep(2);
-            } while(!temp);      // 开始获取摄像头数据
+            Dual_Get_Ready_sem.acquire();          // 等待同步获取双摄像头数据
 
-            Get_Ready_sem.acquire();
-            Get_Ready = false;
-            Get_Ready_sem.release();
-
-            //Flir摄像头数据
+            // 开始获取Flir摄像头数据
             while(transfer(Lepton_fd) != 59);           // read SPI data(lepton)
             save_Lepton_Data();
 
             ShowSignal_Send();
-            msleep(55);
-            //msleep(90);
+            msleep(60);
         }
     }
 }

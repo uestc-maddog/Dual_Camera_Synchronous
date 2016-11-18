@@ -34,7 +34,7 @@ struct buf_info{
     unsigned int length;
     void *start;
 };
-struct video_dev      
+struct video_dev
 {
     int fd;
     int cap_width, cap_height;
@@ -51,15 +51,13 @@ int stopCapture(void);
 void closeCapture(void);
 void yuyv2rgb(const uchar *yuv);
 
-volatile bool Get_Ready = false;      // true:获取数据信号
-volatile bool Get_Over = false;       // true:Flir获取数据完成
-volatile bool UVC_Init_Over = false;  // true:UVC初始化完成
-volatile bool Show_Over = true;       // true:一帧融合图像显示完成
+volatile bool Flir_Get_Over = false;       // true:Flir获取数据完成
+volatile bool Dual_Show_Over = true;       // true:一帧融合图像显示完成
 
-QSemaphore Init_Over_sem(1);
-QSemaphore Get_Ready_sem(1);
-QSemaphore Get_Over_sem(1);
-QSemaphore Show_Over_sem(1);
+QSemaphore UVC_Init_Over_sem(0);
+QSemaphore Dual_Get_Ready_sem(0);
+QSemaphore Flir_Get_Over_sem(1);
+QSemaphore Dual_Show_Over_sem(1);
 
 int  subInitCapture(void);
 void vidioc_enuminput(int fd);
@@ -76,33 +74,20 @@ void UVCThread::run()
     {
         if(initCapture()  < 0) return;
         if(startCapture() < 0) return;
-        Show_Over_sem.acquire();
-        Show_Over = true;       // true:一帧融合图像显示完成
-        Show_Over_sem.release();
-        Init_Over_sem.acquire();
-        UVC_Init_Over = true;
-        Init_Over_sem.release();
+
+        msleep(30);
+        UVC_Init_Over_sem.release();
         while (1)
         {
-            // 等待上一帧融合图像显示完成
+            // 等待上一帧融合图像显示完成           此do...while改为单纯的信号量阻塞不可行 可能是由于此信号量在主线程中使用的未知问题
             do{
-                Show_Over_sem.acquire();
-                temp = Show_Over;
-                Show_Over_sem.release();
-            } while(!temp);               // 等待Flir获取数据完成
+                Dual_Show_Over_sem.acquire();
+                temp = Dual_Show_Over;
+                Dual_Show_Over_sem.release();
+            } while(!temp);
+            Dual_Show_Over = false;        // 清除显示完成标志
 
-            // 开始下一次获取
-            Show_Over_sem.acquire();
-            Show_Over = false;        // true:一帧融合图像显示完成
-            Show_Over_sem.release();
-
-            Get_Over_sem.acquire();
-            Get_Over = false;         // true:Flir获取数据完成
-            Get_Over_sem.release();
-
-            Get_Ready_sem.acquire();
-            Get_Ready = true;         // true:获取数据信号
-            Get_Ready_sem.release();
+            Dual_Get_Ready_sem.release();  // 开始同步获取UVC数据
             //msleep(10);   // slow
             if(captureFrame() < 0)    // 获取UVC数据出错
             {
@@ -113,20 +98,16 @@ void UVCThread::run()
             }
             else
             {
-                do{
-                    Get_Over_sem.acquire();
-                    temp = Get_Over;
-                      Get_Over_sem.release();
+                do{                          // 此do...while改为单纯的信号量阻塞不可行 可能是由于此信号量在主线程中使用的未知问题
+                    Flir_Get_Over_sem.acquire();
+                    temp = Flir_Get_Over;
+                    Flir_Get_Over_sem.release();
                 } while(!temp);               // 等待Flir获取数据完成
-                //qDebug() << "Get_Over";
-
-                Get_Ready_sem.acquire();
-                Get_Ready = false;
-                Get_Ready_sem.release();
+                Flir_Get_Over = false;             // 清除完成标志
 
                 ShowUVCSignal_Send();         // 不断地发送更新摄像头数据信号，and不断地刷新RGB图像
             }
-            msleep(60);   //99
+            msleep(65);   //99
         }
         msleep(100);
     }

@@ -19,14 +19,13 @@
 #include<fcntl.h>
 
 extern volatile short RGB_Data[320*240*3];     // 320*240分辨率的RGB数据
-extern volatile bool Get_Ready;      // true:获取数据信号
-extern volatile bool Get_Over;       // true:Flir获取数据完成
-extern volatile bool Show_Over;      // true:一帧融合图像显示完成
+extern volatile bool Flir_Get_Over;       // true:Flir获取数据完成
+extern volatile bool Dual_Show_Over;      // true:一帧融合图像显示完成
 
-extern QSemaphore Get_Ready_sem;
-extern QSemaphore Get_Over_sem;
-extern QSemaphore Init_Over_sem;
-extern QSemaphore Show_Over_sem;
+extern QSemaphore Dual_Get_Ready_sem;
+extern QSemaphore Flir_Get_Over_sem;
+extern QSemaphore UVC_Init_Over_sem;
+extern QSemaphore Dual_Show_Over_sem;
 
 extern volatile uchar *UVC_P;
 extern void yuyv2rgb(const uchar *yuv);
@@ -227,9 +226,9 @@ void MainWindow::updateUVCImage(void)
 //    QString Timer = time1.toString("mmss");
 //    qDebug() << "+:"<< Timer;
 
-    Show_Over_sem.acquire();
-    Show_Over = true;
-    Show_Over_sem.release();
+    Dual_Show_Over_sem.acquire();
+    Dual_Show_Over = true;
+    Dual_Show_Over_sem.release();
     qDebug() << "+";
     //qDebug() << "Show_Over";
 }
@@ -291,7 +290,7 @@ void MainWindow::updateLeptonImage(void)
             }
         }
     }
-    Get_Over_sem.acquire();
-    Get_Over = true;      // true:Flir获取数据完成
-    Get_Over_sem.release();
+    Flir_Get_Over_sem.acquire();
+    Flir_Get_Over = true;      // true:Flir获取数据完成
+    Flir_Get_Over_sem.release();
 }
